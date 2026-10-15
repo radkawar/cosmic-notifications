@@ -2,6 +2,13 @@
 
 Layer Shell notifications daemon which integrates with COSMIC.
 
+# Notification actions
+
+Non-default actions are shown as labelled buttons. Clicking a button invokes
+that action; clicking the notification card invokes only an explicitly supplied
+`default` action, never the first button. A consent notification without a
+`default` action therefore requires choosing one of its buttons.
+
 # Building
 
 Cosmic Notifications is set up to build a deb and a Nix flake, but it can be built using just.

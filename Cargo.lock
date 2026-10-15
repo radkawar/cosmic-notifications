@@ -978,7 +978,7 @@ dependencies = [
 
 [[package]]
 name = "cosmic-notifications"
-version = "1.10.0"
+version = "1.10.0-lindm-actions.1"
 dependencies = [
  "anyhow",
  "color-backtrace",

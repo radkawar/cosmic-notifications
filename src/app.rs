@@ -68,6 +68,7 @@ struct CosmicNotifications {
 #[derive(Debug, Clone)]
 enum Message {
     ActivateNotification(u32),
+    ActivateAction(u32, ActionId),
     ActivationToken(Option<String>, u32, Option<ActionId>),
     Dismissed(u32),
     Notification(notifications::Event),
@@ -512,9 +513,27 @@ impl CosmicNotifications {
                                                 rich_text(html_to_spans(&n.body)).size(12.0)
                                             )
                                             .map(|_: ()| Message::Ignore)
-                                        ]
+                                        ],
+                                        cosmic::iced::widget::column(
+                                            n.actions
+                                                .iter()
+                                                .filter(|(action, _)| {
+                                                    !matches!(action, ActionId::Default)
+                                                })
+                                                .map(|(action, label)| {
+                                                    button::standard(label.as_str())
+                                                        .width(Length::Fill)
+                                                        .on_press(Message::ActivateAction(
+                                                            n.id,
+                                                            action.clone(),
+                                                        ))
+                                                        .into()
+                                                }),
+                                        )
+                                        .spacing(8)
                                     )
-                                    .width(Length::Fill),
+                                    .width(Length::Fill)
+                                    .spacing(8),
                                 );
                                 (n.id, e)
                             })
@@ -659,24 +678,14 @@ impl CosmicNotifications {
                     .map(|pos| &self.hidden[pos])
             })?;
 
-            let maybe_action = if action
-                .as_ref()
-                .is_some_and(|a| notification.actions.iter().any(|(b, _)| b == a))
-            {
-                action.clone().map(|a| a.to_string())
-            } else if notification
-                .actions
-                .iter()
-                .any(|a| matches!(a.0, ActionId::Default))
-            {
-                Some(ActionId::Default.to_string())
-            } else {
-                notification.actions.first().map(|a| a.0.to_string())
+            let Some(action) = activation_action(&notification.actions, action.as_ref()) else {
+                return if notification.actions.is_empty() {
+                    self.close(id, CloseReason::Dismissed)
+                } else {
+                    None
+                };
             };
-
-            let Some(action) = maybe_action else {
-                return self.close(id, CloseReason::Dismissed);
-            };
+            let action = action.to_string();
             let tx = tx.clone();
             tracing::info!("action for {id} {action}");
             return Some(Task::future(async move {
@@ -691,6 +700,17 @@ impl CosmicNotifications {
             None
         }
     }
+}
+
+fn activation_action<'a>(
+    actions: &'a [(ActionId, String)],
+    requested: Option<&ActionId>,
+) -> Option<&'a ActionId> {
+    let requested = requested.unwrap_or(&ActionId::Default);
+    actions
+        .iter()
+        .find(|(action, _)| action == requested)
+        .map(|(action, _)| action)
 }
 
 impl cosmic::Application for CosmicNotifications {
@@ -760,6 +780,9 @@ impl cosmic::Application for CosmicNotifications {
             Message::ActivateNotification(id) => {
                 tracing::trace!("requesting token for {id}");
                 return self.request_activation(id, None);
+            }
+            Message::ActivateAction(id, action) => {
+                return self.request_activation(id, Some(action));
             }
             Message::ActivationToken(token, id, action) => {
                 tracing::trace!("token for {id}");
@@ -924,5 +947,40 @@ impl cosmic::Application for CosmicNotifications {
                 }),
             notifications::notifications().map(Message::Notification),
         ])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn card_does_not_choose_a_consent_action() {
+        let actions = vec![
+            (ActionId::Custom("allow".into()), "Allow".into()),
+            (ActionId::Custom("decline".into()), "Decline".into()),
+        ];
+        assert_eq!(activation_action(&actions, None), None);
+        for (action, _) in &actions {
+            assert_eq!(activation_action(&actions, Some(action)), Some(action));
+        }
+        assert_eq!(
+            activation_action(&actions, Some(&ActionId::Custom("removed".into()))),
+            None
+        );
+    }
+
+    #[test]
+    fn only_default_action_activates_from_card() {
+        let actions = vec![
+            (ActionId::Custom("decline".into()), "Decline".into()),
+            (ActionId::Default, "Open".into()),
+        ];
+        assert_eq!(activation_action(&actions, None), Some(&ActionId::Default));
+        assert_eq!(
+            activation_action(&actions, Some(&ActionId::Custom("removed".into()))),
+            None
+        );
+        assert_eq!(activation_action(&[], None), None);
     }
 }
